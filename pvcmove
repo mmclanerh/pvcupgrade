@@ -92,9 +92,6 @@ function add_movedc () {
   statuscheck $?
   LATEST_DC=$(get_dcversion ${dcname})
 }
-## debug:
-##   oc processs -f pvcinfo.template.yml -p TEMPLATE_NAME=pvcinfo -p SOURCE_VOLUME=nnn | oc -n nnnproject create -f - 
-##   oc -n nnnproject rollout resume dc/pvcinfo
 
 function del_movedc () {
   dcname="$1"

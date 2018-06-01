@@ -1,0 +1,141 @@
+#!/bin/sh
+
+activity=pvcinfo
+
+short_date=$(/bin/date +%m%d%y%H%M)
+DLOG="${HOME}/pvcinfo-debug.${short_date}.log"
+LOG="${HOME}/pvcinfo.log"
+exec 100>>${DLOG}
+BASH_XTRACEFD=100
+set -x
+date -u
+
+if [ -z "${1}" ]; then
+  echo "Need project name"
+  set +xv
+  exit 1
+fi
+
+if [ -z "${2}" ]; then
+  echo "Need pv claim name"
+  set +xv
+  exit 1
+fi
+
+project="${1}"
+pvcname="${2}"
+
+case ${project} in
+  *-che)
+    service=che
+    ;;
+  *-jenkins)
+    service=jenkins
+    ;;
+  *-run)
+    service=run
+    ;;
+  *-stage)
+    service=stage
+    ;;
+  *)
+    service=build
+    ;;
+esac
+tenant=$(echo ${project} | sed -e 's/\(-jenkins$\|-che$\|-run$\|-stage$\)//')
+
+function log () {
+  echo "`date -u` (${project}:${pvcname}:${action}) ${*}" | tee -a ${LOG}
+}
+function logsentry () {
+    if [ ! -z "${SENTRY_DSN}" ]; then
+      sentry-cli send-event --logfile ${DLOG} --message "${1}" --tag pvcname:${pvcname} --tag project:${project} --tag tenant:${tenant} --tag service:${service} --no-environ
+    fi
+}
+
+function do_debug () {
+  echo "########### ${project}:events"
+  oc -n ${project} get events | tail -n5
+  echo "########### ${project}:dc,rc,po,pvc"
+  oc -n ${project} get dc,rc,po,pvc
+}
+
+function statuscheck () {
+  if [ ${1} -ne 0 ]; then
+    log "Non-zero (${1}) return, check debug log ${DLOG}"
+    logsentry "Unexpected fault, exiting"
+    exit 1
+  fi
+}
+
+function get_dcversion () {
+  dcname="${1}"
+  OUT=$(oc -n ${project} get dc/${dcname} -o jsonpath='{.status.latestVersion}')
+  statuscheck $?
+  echo ${OUT}
+}
+
+function add_infodc () {
+  dcname="$1"
+  src="$2"
+  oc process -f pvcinfo.template.yml -p TEMPLATE_NAME=${dcname} -p SOURCE_VOLUME=${src} | oc -n ${project} create -f - 2>&1
+  statuscheck $?
+  oc -n ${project} rollout resume dc/${dcname} 2>&1
+  statuscheck $?
+  LATEST_DC=$(get_dcversion ${dcname})
+}
+
+function del_infodc () {
+  dcname="$1"
+  oc -n ${project} delete dc/${dcname} 2>&1
+  statuscheck $?
+}
+
+function check_dc () {
+  dcname="$1"
+  pvctimeout=300
+  log "Making sure dc/${dcname} has available replicas"
+  COUNT=0
+  while [ ${COUNT} -lt ${pvctimeout} ]; do
+    echo -n "."
+    rctotal=$(oc -n ${project} get dc/pvcinfo -ojsonpath='{.status.availableReplicas}')
+    if [ "${rctotal}" != "0" ]; then
+      echo " Success!"
+      sleep 1
+      break
+    fi
+    sleep 1
+    COUNT=$((${COUNT}+1))
+  done
+  if [ ${COUNT} -gt ${pvctimeout} ]; then
+    echo " Timeout!"
+    log "Timeout waiting for dc/${dcname} to come on-line"
+    statuscheck 1
+  else 
+    log "dc/${dcname} is now on-line"
+  fi
+}
+
+function check_pvcusage () {
+  dcname="$1"
+  src="$2"
+  log "Checking usage of ${src} in dc/${dcname} active pod"
+  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=3600 dc/${dcname} /usr/sbin/du-osio ${src})
+  ERR=$?
+  statuscheck ${ERR}
+  echo ${OUT}
+}
+
+log "Begin pvc info for project \"${project}\", pvc \"${pvcname}\" to class \"${pvcclass}\""
+
+action="Add info  DC"
+add_infodc pvcinfo ${pvcname} temp-${pvcname}
+action="Verify DC spun up"
+check_dc pvcinfo
+action="Check PVC usage"
+check_pvcusage pvcinfo /source
+action="Remove info DC"
+del_infodc pvcinfo
+
+set +xv
+echo "# debug: ${DLOG}"
