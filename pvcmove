@@ -72,20 +72,24 @@ function statuscheck () {
     log "Non-zero (${1}) return, check debug log ${DLOG}"
     logsentry "Command returned error, exiting"
     exit 1
+  else
+    log "Command returned success"
   fi
 }
 
 function get_dcversion () {
   dcname="${1}"
+  log "Getting latested dc version for dc/${dcname}"
   OUT=$(oc -n ${project} get dc/${dcname} -o jsonpath='{.status.latestVersion}')
   statuscheck $?
-  echo ${OUT}
+  log "${OUT}"
 }
 
 function add_movedc () {
   dcname="$1"
   src="$2"
   dst="$3"
+  log "Adding dc/${dcname} with mounts source:${src} and destination:${dst}"
   oc process -f pvcmove.template.yml -p TEMPLATE_NAME=${dcname} -p SOURCE_VOLUME=${src} -p DEST_VOLUME="${dst}" | oc -n ${project} create -f - 2>&1
   statuscheck $?
   oc -n ${project} rollout resume dc/${dcname} 2>&1
@@ -95,14 +99,15 @@ function add_movedc () {
 
 function del_movedc () {
   dcname="$1"
+  log "Removing dc/${dcname}"
   oc -n ${project} delete dc/${dcname} 2>&1
   statuscheck $?
 }
 
 function add_pvc () {
   pvc="$1"
+  log "Adding pvc/${pvc} to project/${project}"
   oc process -f new_pvc.template.yml -p PVC_NAME="${pvc}" -p STORAGE_CLASS=${pvcclass} | oc -n ${project} create -f - 2>&1
-  log "Removed pvc/${pvc}"
   statuscheck $?
 }
 
@@ -132,6 +137,7 @@ function check_dc () {
     rctotal=$(oc -n ${project} get dc/pvcmove -ojsonpath='{.status.availableReplicas}')
     if [ "${rctotal}" != "0" ]; then
       echo " Success!"
+      log "Replicas running for dc/${dcname}"
       sleep 1
       break
     fi
@@ -147,6 +153,20 @@ function check_dc () {
   fi
 }
 
+function check_runningpods () {
+  log "Verifying: Are pods running in project/${project}?"
+  podcount=$(oc -n ${project} get po --no-headers | wc -l)
+  if [ "${podcount}" -gt "0" ]; then
+    log "Pods (${podcount}) are active for ${project}, terminating"
+    logsentry "Pods (${podcount}) are active for ${project}, retry later"
+    set +xv
+    echo "# debug: ${DLOG}"
+    exit 1
+  fi
+  log "Confirmed: No pods are running in project/${project}"
+}     
+
+
 function check_pvcusage () {
   dcname="$1"
   src="$2"
@@ -161,6 +181,7 @@ function rsync_pvc () {
   dcname="$1"
   src="$2"
   dst="$3"
+  log "Copying from ${src} to ${dst} through dc/${dcname}"
   OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=3600 dc/${dcname} /usr/sbin/rsync-osio ${src} ${dst})
   ERR=$?
   if [ ${ERR} -ne 23 ]; then
@@ -170,6 +191,7 @@ function rsync_pvc () {
 }
 
 function update_quota () {
+  log "Increasing pvc hard limit quota for project/${project}"
   case ${service} in
    che)
      pvclimit=4
@@ -181,11 +203,12 @@ function update_quota () {
      pvclimit=3
      ;;
   esac
-  echo oc -n ${project} patch quota object-counts -p '{"spec":{"hard":{"persistentvolumeclaims":"'${pvclimit}'"}}}'
+  oc -n ${project} patch quota object-counts -p '{"spec":{"hard":{"persistentvolumeclaims":"'${pvclimit}'"}}}'
   statuscheck $?
 }
 
 function reset_quota () {
+  log "Restoring pvc hard limit quota for project/${project}"
   case ${service} in
    che)
      pvclimit=2
@@ -197,11 +220,14 @@ function reset_quota () {
      pvclimit=1 
      ;;
   esac
-  echo oc -n ${project} patch quota object-counts -p '{"spec":{"hard":{"persistentvolumeclaims":"'${pvclimit}'"}}}'
+  oc -n ${project} patch quota object-counts -p '{"spec":{"hard":{"persistentvolumeclaims":"'${pvclimit}'"}}}'
   statuscheck $?
 }
 
 log "Begin pvc move for project \"${project}\", pvc \"${pvcname}\" to class \"${pvcclass}\""
+
+action="Check for running pods"
+check_runningpods
 
 action="Update quota"
 update_quota 
@@ -236,6 +262,8 @@ action="Remove temp PVC"
 del_pvc temp-${pvcname} wait
 action="Restore quota"
 reset_quota
+
+log "Completed pvc move for project \"${project}\", pvc \"${pvcname}\" to class \"${pvcclass}\""
 
 set +xv
 echo "# debug: ${DLOG}"
