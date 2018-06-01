@@ -193,6 +193,9 @@ function rsync_pvc () {
   dcname="$1"
   src="$2"
   dst="$3"
+  log "Grabbing volume info for dc/${dcname}"
+  OUT=$(oc -n ${project} volume dc/${dcname})
+  log "${OUT}"
   log "Copying from ${src} to ${dst} through dc/${dcname}"
   OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /usr/sbin/rsync-osio ${src} ${dst})
   ERR=$?
