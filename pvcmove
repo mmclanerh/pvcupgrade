@@ -62,10 +62,12 @@ function logsentry () {
 }
 
 function do_debug () {
-  echo "########### ${project}:events"
-  oc -n ${project} get events | tail -n5
-  echo "########### ${project}:dc,rc,po,pvc"
-  oc -n ${project} get dc,rc,po,pvc
+  #echo "########### ${project}:events"
+  #oc -n ${project} get events | tail -n5
+ 
+  log "######DEBUG###### ${project}:dc,rc,po,pvc"
+  OUT=$(echo xxx;oc -n ${project} get dc,rc,po,pvc --no-headers)
+  log "${OUT}"
 }
 
 function statuscheck () {
@@ -199,10 +201,10 @@ function rsync_pvc () {
   log "Copying from ${src} to ${dst} through dc/${dcname}"
   OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /usr/sbin/rsync-osio ${src} ${dst})
   ERR=$?
+  log "${OUT}"
   if [ ${ERR} -ne 23 ]; then
     statuscheck ${ERR}
   fi
-  log "${OUT}"
 }
 
 function update_quota () {
@@ -252,16 +254,22 @@ action="Add temp copy DC"
 add_movedc pvcmove ${pvcname} temp-${pvcname}
 action="Verify DC spun up"
 check_dc pvcmove
+### debugging
+do_debug
 action="Check PVC usage"
 check_pvcusage pvcmove /source
 
 action="Copy data to temp PVC"
 rsync_pvc pvcmove /source/ /dest
+### debugging
+do_debug
 action="Remove temp copy DC"
 del_movedc pvcmove
 
 action="Remove original PVC"
 del_pvc ${pvcname} wait
+### debugging
+do_debug
 
 action="Add new PVC"
 add_pvc ${pvcname}
@@ -269,12 +277,18 @@ action="Add new copy DC"
 add_movedc pvcmove temp-${pvcname} ${pvcname}
 action="Verify DC spun up"
 check_dc pvcmove
+### debugging
+do_debug
 action="Copy data to new PVC"
 rsync_pvc pvcmove /source/ /dest
 action="Remove new copy DC"
 del_movedc pvcmove
+### debugging
+do_debug
 action="Remove temp PVC"
 del_pvc temp-${pvcname} wait
+### debugging
+do_debug
 action="Restore quota"
 reset_quota
 
