@@ -17,6 +17,7 @@ if [ -z "${1}" ]; then
 fi
 
 if [ -z "${2}" ]; then
+  oc -n ${1} get pvc --no-headers
   echo "Need pv claim name"
   set +xv
   exit 1
@@ -109,6 +110,15 @@ function add_pvc () {
   log "Adding pvc/${pvc} to project/${project}"
   oc process -f new_pvc.template.yml -p PVC_NAME="${pvc}" -p STORAGE_CLASS=${pvcclass} | oc -n ${project} create -f - 2>&1
   statuscheck $?
+  log "Verifying: pvc/${pvc} is added"
+  ADDED=no
+  while [ "${ADDED}" == "no" ]; do
+    OUT=$(oc -n ${project} get pvc/${pvc})
+    [ $? -eq 0 ] && ADDED="yes"
+    sleep 1
+  done
+  log "${OUT}"
+  log "Confirmed: pvc/${pvc} is present"
 }
 
 function del_pvc () {
@@ -120,9 +130,11 @@ function del_pvc () {
     log "Verifying: pvc/${pvc} is absent"
     REMOVED=no
     while [ "${REMOVED}" == "no" ]; do
-      oc -n ${project} get pvc/${pvc} || REMOVED="yes"
+      OUT=$(oc -n ${project} get pvc/${pvc})
+      [ $? -eq 0 ] || REMOVED="yes"
       sleep 1
     done
+    log "${OUT}"
     log "Confirmed: pvc/${pvc} is absent"
   fi 
 }
@@ -174,7 +186,7 @@ function check_pvcusage () {
   OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /usr/sbin/du-osio ${src})
   ERR=$?
   statuscheck ${ERR}
-  echo ${OUT}
+  log "${OUT}"
 }
 
 function rsync_pvc () {
@@ -187,7 +199,7 @@ function rsync_pvc () {
   if [ ${ERR} -ne 23 ]; then
     statuscheck ${ERR}
   fi
-  echo ${OUT}
+  log "${OUT}"
 }
 
 function update_quota () {
@@ -241,7 +253,7 @@ action="Check PVC usage"
 check_pvcusage pvcmove /source
 
 action="Copy data to temp PVC"
-rsync_pvc pvcmove /source /dest
+rsync_pvc pvcmove /source/ /dest
 action="Remove temp copy DC"
 del_movedc pvcmove
 
@@ -255,7 +267,7 @@ add_movedc pvcmove temp-${pvcname} ${pvcname}
 action="Verify DC spun up"
 check_dc pvcmove
 action="Copy data to new PVC"
-rsync_pvc pvcmove /source /dest
+rsync_pvc pvcmove /source/ /dest
 action="Remove new copy DC"
 del_movedc pvcmove
 action="Remove temp PVC"

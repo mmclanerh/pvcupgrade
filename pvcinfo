@@ -17,6 +17,7 @@ if [ -z "${1}" ]; then
 fi
 
 if [ -z "${2}" ]; then
+  oc -n ${1} get pvc --no-headers
   echo "Need pv claim name"
   set +xv
   exit 1
