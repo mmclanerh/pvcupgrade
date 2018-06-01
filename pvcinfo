@@ -87,8 +87,7 @@ function add_infodc () {
 
 function del_infodc () {
   dcname="$1"
-  oc -n ${project} delete dc/${dcname} 2>&1
-  statuscheck $?
+  oc -n ${project} delete dc/${dcname}
 }
 
 function check_dc () {
@@ -120,10 +119,9 @@ function check_pvcusage () {
   dcname="$1"
   src="$2"
   log "Checking usage of ${src} in dc/${dcname} active pod"
-  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=3600 dc/${dcname} /usr/sbin/du-osio ${src})
+  oc -n ${project} rsh --shell=/bin/bash --timeout=120 dc/${dcname} /usr/sbin/du-osio ${src}
   ERR=$?
   statuscheck ${ERR}
-  echo ${OUT}
 }
 
 log "Begin pvc info for project \"${project}\", pvc \"${pvcname}\" to class \"${pvcclass}\""
@@ -134,8 +132,14 @@ action="Verify DC spun up"
 check_dc pvcinfo
 action="Check PVC usage"
 check_pvcusage pvcinfo /source
-action="Remove info DC"
-del_infodc pvcinfo
+# action="Remove info DC"
+# del_infodc pvcinfo
+
+oc -n ${project} get pvc --no-headers
+echo "To rsh, run: "
+echo "  oc -n ${project} rsh --shell=/bin/bash --timeout=60 dc/pvcinfo"
+echo "To remove, run: "
+echo "  oc -n ${project} delete dc/pvcinfo"
 
 set +xv
 echo "# debug: ${DLOG}"

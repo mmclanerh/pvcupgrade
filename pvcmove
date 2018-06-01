@@ -171,7 +171,7 @@ function check_pvcusage () {
   dcname="$1"
   src="$2"
   log "Checking usage of ${src} in dc/${dcname} active pod"
-  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=3600 dc/${dcname} /usr/sbin/du-osio ${src})
+  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /usr/sbin/du-osio ${src})
   ERR=$?
   statuscheck ${ERR}
   echo ${OUT}
@@ -182,7 +182,7 @@ function rsync_pvc () {
   src="$2"
   dst="$3"
   log "Copying from ${src} to ${dst} through dc/${dcname}"
-  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=3600 dc/${dcname} /usr/sbin/rsync-osio ${src} ${dst})
+  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /usr/sbin/rsync-osio ${src} ${dst})
   ERR=$?
   if [ ${ERR} -ne 23 ]; then
     statuscheck ${ERR}
