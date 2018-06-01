@@ -1,6 +1,8 @@
 #!/bin/sh
 
-short_date=$(/bin/date +%m%d%y)
+activity=pvcmove
+
+short_date=$(/bin/date +%m%d%y%H%M)
 DLOG="${HOME}/pvcmove-debug.${short_date}.log"
 LOG="${HOME}/pvcmove.log"
 exec 100>>${DLOG}
@@ -73,7 +75,7 @@ function statuscheck () {
   fi
 }
 
-function get_lastestdcversion () {
+function get_dcversion () {
   dcname="${1}"
   OUT=$(oc -n ${project} get dc/${dcname} -o jsonpath='{.status.latestVersion}')
   statuscheck $?
@@ -84,11 +86,11 @@ function add_movedc () {
   dcname="$1"
   src="$2"
   dst="$3"
-  oc process -f pvcmove.template.yml -p TEMPLATE_NAME=${dcname} -p SOURCE_VOLUME=${src} -p DEST_VOLUME="${dst}" | oc -n ${project} create -f -
+  oc process -f pvcmove.template.yml -p TEMPLATE_NAME=${dcname} -p SOURCE_VOLUME=${src} -p DEST_VOLUME="${dst}" | oc -n ${project} create -f - 2>&1
   statuscheck $?
-  oc -n ${project} rollout resume dc/${dcname}
+  oc -n ${project} rollout resume dc/${dcname} 2>&1
   statuscheck $?
-  LATEST_DC=$(get_lastestdcversion)
+  LATEST_DC=$(get_dcversion ${dcname})
 }
 
 function del_movedc () {
@@ -99,43 +101,141 @@ function del_movedc () {
 
 function add_pvc () {
   pvc="$1"
-  oc process -f new_pvc.template.yml -p PVC_NAME="${pvc}" -p STORAGE_CLASS=${pvcclass} | oc -n ${project} create -f -
+  oc process -f new_pvc.template.yml -p PVC_NAME="${pvc}" -p STORAGE_CLASS=${pvcclass} | oc -n ${project} create -f - 2>&1
+  log "Removed pvc/${pvc}"
   statuscheck $?
 }
 
 function del_pvc () {
   pvc="$1"
-  oc -n ${project} delete pvc/${pvc}
+  log "Removing pvc/${pvc}"
+  oc -n ${project} delete pvc/${pvc} 2>&1 
   statuscheck $?
+  if [ ! -z "${2}" ] && [ "${2}" == "wait" ]; then
+    log "Verifying: pvc/${pvc} is absent"
+    REMOVED=no
+    while [ "${REMOVED}" == "no" ]; do
+      oc -n ${project} get pvc/${pvc} || REMOVED="yes"
+      sleep 1
+    done
+    log "Confirmed: pvc/${pvc} is absent"
+  fi 
+}
+
+function check_dc () {
+  dcname="$1"
+  pvctimeout=300
+  log "Making sure dc/${dcname} has available replicas"
+  COUNT=0
+  while [ ${COUNT} -lt ${pvctimeout} ]; do
+    echo -n "."
+    rctotal=$(oc -n ${project} get dc/pvcmove -ojsonpath='{.status.availableReplicas}')
+    if [ "${rctotal}" != "0" ]; then
+      echo " Success!"
+      sleep 1
+      break
+    fi
+    sleep 1
+    COUNT=$((${COUNT}+1))
+  done
+  if [ ${COUNT} -gt ${pvctimeout} ]; then
+    echo " Timeout!"
+    log "Timeout waiting for dc/${dcname} to come on-line"
+    statuscheck 1
+  else 
+    log "dc/${dcname} is now on-line"
+  fi
+}
+
+function check_pvcusage () {
+  dcname="$1"
+  src="$2"
+  log "Checking usage of ${src} in dc/${dcname} active pod"
+  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=3600 dc/${dcname} /usr/sbin/du-osio ${src})
+  ERR=$?
+  statuscheck ${ERR}
+  echo ${OUT}
+}
+
+function rsync_pvc () {
+  dcname="$1"
+  src="$2"
+  dst="$3"
+  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=3600 dc/${dcname} /usr/sbin/rsync-osio ${src} ${dst})
+  ERR=$?
+  if [ ${ERR} -ne 23 ]; then
+    statuscheck ${ERR}
+  fi
+  echo ${OUT}
 }
 
 function update_quota () {
-  oc -n ${project} patch -f ${HOME}/quotas/${service}.quota.increase.yaml
+  case ${service} in
+   che)
+     pvclimit=4
+     ;;
+   jenkins)
+     pvclimit=5
+     ;;
+   *)
+     pvclimit=3
+     ;;
+  esac
+  echo oc -n ${project} patch quota object-counts -p '{"spec":{"hard":{"persistentvolumeclaims":"'${pvclimit}'"}}}'
   statuscheck $?
 }
 
 function reset_quota () {
-  oc -n ${project} patch -f ${HOME}/quotas/${service}.quota.yaml
+  case ${service} in
+   che)
+     pvclimit=2
+     ;;
+   jenkins)
+     pvclimit=3
+     ;;
+   *)
+     pvclimit=1 
+     ;;
+  esac
+  echo oc -n ${project} patch quota object-counts -p '{"spec":{"hard":{"persistentvolumeclaims":"'${pvclimit}'"}}}'
   statuscheck $?
 }
 
 log "Begin pvc move for project \"${project}\", pvc \"${pvcname}\" to class \"${pvcclass}\""
 
+action="Update quota"
+update_quota 
 action="Create temp PVC"
 add_pvc temp-${pvcname}
-action="Update quota"
 action="Add temp copy DC"
 add_movedc pvcmove ${pvcname} temp-${pvcname}
-do_debug
+action="Verify DC spun up"
+check_dc pvcmove
+action="Check PVC usage"
+check_pvcusage pvcmove /source
+
 action="Copy data to temp PVC"
+rsync_pvc pvcmove /source /dest
 action="Remove temp copy DC"
+del_movedc pvcmove
+
 action="Remove original PVC"
+del_pvc ${pvcname} wait
+
 action="Add new PVC"
+add_pvc ${pvcname}
 action="Add new copy DC"
+add_movedc pvcmove temp-${pvcname} ${pvcname}
+action="Verify DC spun up"
+check_dc pvcmove
 action="Copy data to new PVC"
+rsync_pvc pvcmove /source /dest
 action="Remove new copy DC"
+del_movedc pvcmove
 action="Remove temp PVC"
+del_pvc temp-${pvcname} wait
 action="Restore quota"
+reset_quota
 
 set +xv
 echo "# debug: ${DLOG}"
