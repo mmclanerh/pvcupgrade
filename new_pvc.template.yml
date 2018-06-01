@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: new_pvc
+objects:
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${PVC_NAME}
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: 1Gi
+  storageClassName: ${STORAGE_CLASS}
+parameters:
+- name: "PVC_NAME"
+  description: "PVC claim name"
+  value: "tmp-foo_volume"
+- name: "STORAGE_CLASS"
+  description: "Storage class, usually gluster-subvol or ebs"
+  value:  gluster-subvol

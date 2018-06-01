@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Template
+metadata:
+  creationTimestamp: null
+  name: ${TEMPLATE_NAME}
+objects:
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      run: ${TEMPLATE_NAME}
+    name: ${TEMPLATE_NAME}
+  spec:
+    paused: true
+    replicas: ${REPLICAS}
+    revisionHistoryLimit: 1
+    selector:
+      run: ${TEMPLATE_NAME}
+    strategy:
+      recreateParams:
+        timeoutSeconds: 3600
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          run: ${TEMPLATE_NAME}
+      spec:
+        containers:
+        - args:
+          - tail
+          - -f
+          - /dev/null
+          image: registry.devshift.net/jfchevrette/centos-rsync:latest
+          imagePullPolicy: IfNotPresent
+          name: ${TEMPLATE_NAME}
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+          - mountPath: /source
+            name: ${SOURCE_VOLUME}
+          - mountPath: /dest
+            name: ${DEST_VOLUME}
+        terminationGracePeriodSeconds: 15
+        volumes:
+        - name: ${SOURCE_VOLUME}
+          persistentVolumeClaim:
+            claimName: ${SOURCE_VOLUME}
+        - name: ${DEST_VOLUME}
+          persistentVolumeClaim:
+            claimName: ${DEST_VOLUME}
+    test: false
+parameters:
+- name: TEMPLATE_NAME
+  description: "Template name (to allow for concurrent deploymentconfigs)"
+  value: "pvcmove"
+- name: SOURCE_VOLUME
+  description: "Source PVC claim name (ex: jenkins-home)"
+  required: true
+- name: DEST_VOLUME
+  description: "Destination PVC claim name (ex: tmp-jenkins-home)"
+  required: true
+- name: REPLICAS
+  description: "Number of replicas (usually 0 or 1)"
+  value: "1"
