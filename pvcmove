@@ -57,7 +57,7 @@ function log () {
 }
 function logsentry () {
     if [ ! -z "${SENTRY_DSN}" ]; then
-      sentry-cli send-event --logfile ${DLOG} --message "${1}" --tag pvcname:${pvcname} --tag project:${project} --tag tenant:${tenant} --tag service:${service} --no-environ
+      sentry-cli send-event --logfile ${LOG} --message "${1}" --tag pvcname:${pvcname} --tag project:${project} --tag tenant:${tenant} --tag service:${service} --no-environ
     fi
 }
 
@@ -85,7 +85,7 @@ function get_dcversion () {
   log "Getting latested dc version for dc/${dcname}"
   OUT=$(oc -n ${project} get dc/${dcname} -o jsonpath='{.status.latestVersion}')
   statuscheck $?
-  log "${OUT}"
+  log "Latest version: ${OUT}"
 }
 
 function add_movedc () {
@@ -293,6 +293,8 @@ action="Restore quota"
 reset_quota
 
 log "Completed pvc move for project \"${project}\", pvc \"${pvcname}\" to class \"${pvcclass}\""
+
+logsentry "Completed pvc move"
 
 set +xv
 echo "# debug: ${DLOG}"
