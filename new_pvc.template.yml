@@ -13,7 +13,7 @@ objects:
     resources:
       requests:
         storage: 1Gi
-  storageClassName: ${STORAGE_CLASS}
+    storageClassName: ${STORAGE_CLASS}
 parameters:
 - name: "PVC_NAME"
   description: "PVC claim name"
