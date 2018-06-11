@@ -314,6 +314,9 @@ rsync_pvc pvcmove /source/ /dest
 action="Check semaphore on temp PVC source"
 check_copysemaphore pvcmove /source/.sync.${TS}
 
+action="Check semaphore on new PVC target"
+check_copysemaphore pvcmove /dest/.sync.${TS}
+
 action="Remove new copy DC"
 del_movedc pvcmove
 ### debugging
