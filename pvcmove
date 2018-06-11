@@ -2,6 +2,7 @@
 
 activity=pvcmove
 
+TS=$(/bin/date +%s)
 short_date=$(/bin/date +%m%d%y%H%M)
 DLOG="${HOME}/pvcmove-debug.${short_date}.log"
 LOG="${HOME}/pvcmove.log"
@@ -66,7 +67,7 @@ function do_debug () {
   #oc -n ${project} get events | tail -n5
  
   log "######DEBUG###### ${project}:dc,rc,po,pvc"
-  OUT=$(echo xxx;oc -n ${project} get dc,rc,po,pvc --no-headers)
+  OUT=$(echo xxx;oc -n ${project} get dc,rc,po,pvc -o wide --no-headers)
   log "${OUT}"
 }
 
@@ -187,8 +188,8 @@ function check_pvcusage () {
   log "Checking usage of ${src} in dc/${dcname} active pod"
   OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /usr/sbin/du-osio ${src})
   ERR=$?
-  statuscheck ${ERR}
   log "${OUT}"
+  statuscheck ${ERR}
 }
 
 function rsync_pvc () {
@@ -203,6 +204,30 @@ function rsync_pvc () {
   ERR=$?
   log "${OUT}"
   if [ ${ERR} -ne 23 ]; then
+    statuscheck ${ERR}
+  fi
+}
+
+function add_copysemaphore () {
+  dcname="$1"
+  semfile="$2"
+  log "Adding ${semfile} to dc/${dcname}"
+  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /usr/bin/touch ${semfile})
+  ERR=$?
+  log "${OUT}"
+  if [ ${ERR} -ne 0 ]; then
+    statuscheck ${ERR}
+  fi
+}
+
+function check_copysemaphore () {
+  dcname="$1"
+  semfile="$2"
+  log "Checking for ${semfile} in dc/${dcname}"
+  OUT=$(oc -n ${project} rsh --shell=/bin/bash --timeout=180 dc/${dcname} /bin/ls -la ${semfile})
+  ERR=$?
+  log "${OUT}"
+  if [ ${ERR} -ne 0 ]; then
     statuscheck ${ERR}
   fi
 }
@@ -259,6 +284,9 @@ do_debug
 action="Check PVC usage"
 check_pvcusage pvcmove /source
 
+action="Add semaphore to originating PVC source"
+add_copysemaphore pvcmove /source/.sync.${TS}
+
 action="Copy data to temp PVC"
 rsync_pvc pvcmove /source/ /dest
 ### debugging
@@ -279,8 +307,13 @@ action="Verify DC spun up"
 check_dc pvcmove
 ### debugging
 do_debug
+
 action="Copy data to new PVC"
 rsync_pvc pvcmove /source/ /dest
+
+action="Check semaphore on temp PVC source"
+check_copysemaphore pvcmove /source/.sync.${TS}
+
 action="Remove new copy DC"
 del_movedc pvcmove
 ### debugging
