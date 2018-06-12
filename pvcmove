@@ -166,6 +166,27 @@ function check_dc () {
   else 
     log "dc/${dcname} is now on-line"
   fi
+  log "Making sure po/${dcname}- not in Terminating state"
+  COUNT=0
+  while [ ${COUNT} -lt ${pvctimeout} ]; do
+    echo -n "."
+    isterminating=$(oc -n ${project} get po -ldeploymentconfig=${dcname} --no-headers|egrep -q Termin;echo $?)
+    if [ "${isterminating}" == "0" ]; then
+      echo " Success!"
+      log "Pods not terminating for dc/${dcname}"
+      sleep 1
+      break
+    fi
+    sleep 1
+    COUNT=$((${COUNT}+1))
+  done
+  if [ ${COUNT} -gt ${pvctimeout} ]; then
+    echo " Timeout!"
+    log "Timeout waiting for po/${dcname} to not be Terminating"
+    statuscheck 1
+  else 
+    log "dc/${dcname} is now on-line"
+  fi
 }
 
 function check_runningpods () {
