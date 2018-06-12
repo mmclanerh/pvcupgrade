@@ -4,8 +4,8 @@ activity=pvcmove
 
 TS=$(/bin/date +%s)
 short_date=$(/bin/date +%m%d%y%H%M)
-DLOG="${HOME}/pvcmove-debug.${short_date}.log"
-LOG="${HOME}/pvcmove.log"
+DLOG="${HOME}/pvcmove-debug.${$}.${short_date}.log"
+LOG="${HOME}/pvcmove.${$}.log"
 exec 100>>${DLOG}
 BASH_XTRACEFD=100
 set -x
@@ -73,7 +73,7 @@ function do_debug () {
 
 function statuscheck () {
   if [ ${1} -ne 0 ]; then
-    log "Non-zero (${1}) return, check debug log ${DLOG}"
+    log "Non-zero (${1}) return, check debug log ${DLOG}, application log ${LOG}."
     logsentry "Command returned error, exiting"
     exit 1
   else
@@ -175,8 +175,9 @@ function check_runningpods () {
     log "Pods (${podcount}) are active for ${project}, terminating"
     logsentry "Pods (${podcount}) are active for ${project}, retry later"
     set +xv
+    echo "# app: ${LOG}"
     echo "# debug: ${DLOG}"
-    exit 1
+    exit 0
   fi
   log "Confirmed: No pods are running in project/${project}"
 }     
@@ -333,4 +334,5 @@ log "Completed pvc move for project \"${project}\", pvc \"${pvcname}\" to class 
 logsentry "Completed pvc move"
 
 set +xv
-echo "# debug: ${DLOG}"
+echo "# app log: ${LOG}"
+echo "# debug log: ${DLOG}"
